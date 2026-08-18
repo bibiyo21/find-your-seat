@@ -44,7 +44,8 @@ async function connectDB() {
   return db;
 }
 
-const upload = multer({ dest: path.join(__dirname, "uploads") });
+// Use memory storage for Vercel (serverless environment)
+const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -133,7 +134,8 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
     const eventId = req.params.id;
     if (!req.file) return res.status(400).json({error:"Excel file is required"});
     
-    const wb = XLSX.readFile(req.file.path, {cellDates:true});
+    // For memory storage, use buffer instead of file path
+    const wb = XLSX.read(req.file.buffer, {cellDates:true});
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, {defval:""});
     if (!rows.length) throw new Error("The first worksheet is empty.");
