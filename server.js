@@ -290,7 +290,7 @@ app.get("/api/events/:id/qr", async (req,res) => {
     const event = await database.collection("events").findOne({_id: eventId});
     if (!event) return res.status(404).json({error:"Event not found"});
     
-    const qrUrl = `${req.protocol}://${req.get('host')}/find-your-seat/${req.params.id}`;
+    const qrUrl = `${req.protocol}://${req.get('host')}/events/${req.params.id}`;
     const qrCode = await QRCode.toDataURL(qrUrl);
     res.json({qrCode, url: qrUrl});
   } catch (e) {
@@ -303,7 +303,8 @@ app.get("/find-your-seat", (req,res) => {
   res.sendFile(path.join(__dirname, "public", "checkin-select.html"));
 });
 
-app.get("/api/find-your-seat/events/list", async (req,res) => {
+// Get all events (for Find Your Seat page)
+app.get("/api/events/list", async (req,res) => {
   try {
     const database = await connectDB();
     const events = await database.collection("events").find({}).toArray();
@@ -313,11 +314,11 @@ app.get("/api/find-your-seat/events/list", async (req,res) => {
   }
 });
 
-app.get("/find-your-seat/:eventId", (req,res) => {
+app.get("/events/:id", (req,res) => {
   res.sendFile(path.join(__dirname, "public", "checkin.html"));
 });
 
-app.get("/api/find-your-seat/:eventId/guest", async (req,res) => {
+app.get("/api/events/:eventId/guest", async (req,res) => {
   try {
     const eventId = safeObjectId(req.params.eventId);
     if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
@@ -345,7 +346,7 @@ app.get("/api/find-your-seat/:eventId/guest", async (req,res) => {
   }
 });
 
-app.post("/api/find-your-seat/:eventId/guest/:guestId", async (req,res) => {
+app.post("/api/events/:eventId/guest/:guestId", async (req,res) => {
   try {
     const eventId = safeObjectId(req.params.eventId);
     const guestId = safeObjectId(req.params.guestId);

@@ -6,7 +6,7 @@ async function loadQRCode(){try{const qr=await api(`/api/events/${currentEvent}/
 async function loadEvents(){
  const events=await api("/api/events"); const box=$("#events"); box.innerHTML="";
  $("#emptyEvents").classList.toggle("hidden",events.length>0);
- events.forEach(e=>{const d=document.createElement("div");d.className="card";d.innerHTML=`<h3>${esc(e.name)}</h3><div class="muted">${e.table_count} tables · ${e.guest_count} guests · ${e.seat_count} seats</div><div style="margin-top:12px;"><a href="/find-your-seat/${e.id}" target="_blank" style="display:inline-block;padding:8px 12px;background:#292723;color:#fff;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">Find Your Seat →</a></div>`;d.onclick=()=>openEvent(e.id);box.appendChild(d)})
+ events.forEach(e=>{const d=document.createElement("div");d.className="card";d.style.cursor="pointer";d.innerHTML=`<h3>${esc(e.name)}</h3><div class="muted">${e.table_count} tables · ${e.guest_count} guests · ${e.seat_count} seats</div><div style="margin-top:12px;"><a href="/events/${e.id}" target="_blank" style="display:inline-block;padding:8px 12px;background:#292723;color:#fff;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">Find Your Seat →</a></div>`;d.onclick=()=>openEvent(e.id);box.appendChild(d)})
 }
 async function openEvent(id){currentEvent=id;data=await api(`/api/events/${id}`);$("#eventsView").classList.add("hidden");$("#eventView").classList.remove("hidden");render();loadQRCode()}
 function render(){

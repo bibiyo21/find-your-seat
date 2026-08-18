@@ -27,7 +27,7 @@ function displayEvents(events) {
 }
 
 function selectEvent(eventId, eventName) {
-  window.location.href = `/find-your-seat/${eventId}`;
+  window.location.href = `/events/${eventId}`;
 }
 
 function filterEvents() {
@@ -46,7 +46,7 @@ function filterEvents() {
 // Load events on page load
 (async () => {
   try {
-    allEvents = await api("/api/find-your-seat/events/list");
+    allEvents = await api("/api/events");
     displayEvents(allEvents);
     
     if (allEvents.length === 0) {

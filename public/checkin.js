@@ -1,5 +1,5 @@
 const $ = s => document.querySelector(s);
-const eventId = Number(window.location.pathname.split('/')[2]);
+const eventId = window.location.pathname.split('/')[2];
 let searchTimer;
 
 function esc(s) {
@@ -20,7 +20,7 @@ async function searchGuests(query) {
   }
   
   try {
-    const guests = await api(`/api/find-your-seat/${eventId}/guest?q=${encodeURIComponent(query)}`);
+    const guests = await api(`/api/events/${eventId}/guest?q=${encodeURIComponent(query)}`);
     
     if (guests.length === 0) {
       $("#searchResults").innerHTML = '<div class="no-results">No guests found</div>';
