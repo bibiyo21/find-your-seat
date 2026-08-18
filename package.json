@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server-mongodb.js",
-    "dev": "node server-sqlite.js"
+    "dev": "node server-sqlite.js",
+    "cache-bust": "node update-cache-bust.js"
   },
   "dependencies": {
     "express": "^5.1.0",
