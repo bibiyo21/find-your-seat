@@ -1,0 +1,29 @@
+let currentEvent=null,data=null;
+const $=s=>document.querySelector(s);
+async function api(url,opt={}){const r=await fetch(url,opt);const j=await r.json();if(!r.ok)throw new Error(j.error||"Request failed");return j}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+async function loadQRCode(){try{const qr=await api(`/api/events/${currentEvent}/qr`);const qrBox=$("#qrCode");if(qrBox){qrBox.innerHTML=`<img src="${qr.qrCode}" alt="Check-in QR Code" style="max-width:200px;border-radius:8px;"><p style="text-align:center;font-size:12px;color:#777;margin-top:8px;"><a href="${qr.url}" target="_blank" style="color:#292723;text-decoration:none;">Check-in Link</a></p>`}}catch(e){console.error("Failed to load QR code:",e)}}
+async function loadEvents(){
+ const events=await api("/api/events"); const box=$("#events"); box.innerHTML="";
+ $("#emptyEvents").classList.toggle("hidden",events.length>0);
+ events.forEach(e=>{const d=document.createElement("div");d.className="card";d.innerHTML=`<h3>${esc(e.name)}</h3><div class="muted">${e.table_count} tables · ${e.guest_count} guests · ${e.seat_count} seats</div><div style="margin-top:12px;"><a href="/find-your-seat/${e.id}" target="_blank" style="display:inline-block;padding:8px 12px;background:#292723;color:#fff;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">Find Your Seat →</a></div>`;d.onclick=()=>openEvent(e.id);box.appendChild(d)})
+}
+async function openEvent(id){currentEvent=id;data=await api(`/api/events/${id}`);$("#eventsView").classList.add("hidden");$("#eventView").classList.remove("hidden");render();loadQRCode()}
+function render(){
+ $("#eventName").textContent=data.event.name;
+ const assigned=data.guests.filter(g=>g.table_number).length;
+ const seats=data.tables.reduce((a,t)=>a+t.seats,0);
+ $("#stats").textContent=`${data.tables.length} tables · ${data.guests.length} guests · ${assigned} assigned · ${seats} seats`;
+ $("#tables").innerHTML=data.tables.map(t=>`<div class="tableRow"><span class="tableNumber">Table ${esc(t.table_number)}</span><span class="grow">${data.guests.filter(g=>g.table_number===t.table_number).length} guests</span><span class="pill">${t.seats} seats</span><input class="seatInput" type="number" min="0" value="${t.seats}" data-table="${t.id}" title="Seat count"></div>`).join("")||'<div class="muted">Import an Excel sheet to create tables.</div>';
+ $("#guests").innerHTML=guestRows(data.guests);
+ document.querySelectorAll("[data-table]").forEach(i=>i.onchange=async()=>{await api(`/api/events/${currentEvent}/tables/${i.dataset.table}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({seats:Number(i.value)})});data=await api(`/api/events/${currentEvent}`);render()})
+}
+function guestRows(gs){return gs.map(g=>`<div class="guestRow"><span class="name">${esc(g.name)}</span><span class="pill">Table ${esc(g.table_number||"Unassigned")}</span>${g.seat_number?`<span class="pill">Seat ${g.seat_number}</span>`:""}</div>`).join("")||'<div class="muted">No guests imported.</div>'}
+$("#newEvent").onclick=()=>{$("#modal").classList.remove("hidden");$("#eventInput").focus()};
+$("#cancel").onclick=()=>$("#modal").classList.add("hidden");
+$("#create").onclick=async()=>{try{const name=$("#eventInput").value.trim();if(!name)return;const e=await api("/api/events",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});$("#modal").classList.add("hidden");$("#eventInput").value="";await openEvent(e.id)}catch(e){alert(e.message)}};
+$("#back").onclick=()=>{$("#eventView").classList.add("hidden");$("#eventsView").classList.remove("hidden");loadEvents()};
+$("#excel").onchange=async e=>{const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append("file",f);try{const r=await api(`/api/events/${currentEvent}/import`,{method:"POST",body:fd});alert(`Imported ${r.imported} guests across ${r.tables} tables. Seat capacity derived from guest rows.`);data=await api(`/api/events/${currentEvent}`);render()}catch(err){alert(err.message)}e.target.value=""};
+$("#guestFilter").oninput=()=>{const q=$("#guestFilter").value.toLowerCase();$("#guests").innerHTML=guestRows(data.guests.filter(g=>g.name.toLowerCase().includes(q)))};
+let lookupTimer;$("#lookup").oninput=()=>{clearTimeout(lookupTimer);const q=$("#lookup").value.trim();if(!q){$("#lookupResults").innerHTML="";return}lookupTimer=setTimeout(async()=>{const rows=await api(`/api/events/${currentEvent}/search?q=${encodeURIComponent(q)}`);$("#lookupResults").innerHTML=rows.map(g=>`<div class="result"><strong>${esc(g.name)}</strong><br>Table <strong>${esc(g.table_number||"Not assigned")}</strong>${g.seat_number?` · Seat ${g.seat_number}`:""}<br><span class="muted">${g.seats||0} seats at this table</span></div>`).join("")||'<div class="muted">No matching guest.</div>'},200)};
+loadEvents();

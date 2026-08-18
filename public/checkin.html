@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Find Your Seat</title>
+<link rel="stylesheet" href="/checkin-style.css">
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>♥ Find Your Seat</h1>
+    <p id="eventName" class="event-name"></p>
+  </div>
+  
+  <div class="content">
+    <div class="search-section">
+      <h2>Find Your Name</h2>
+      <input id="guestSearch" class="search-input" type="text" placeholder="Type your name...">
+      <div id="searchResults" class="results"></div>
+    </div>
+    
+    <div id="guestInfo" class="guest-info hidden">
+      <div class="guest-card">
+        <h2 id="guestName"></h2>
+        <div class="info-row">
+          <span class="label">Table:</span>
+          <span id="guestTable" class="value"></span>
+        </div>
+        <div class="info-row">
+          <span class="label">Seat:</span>
+          <span id="guestSeat" class="value"></span>
+        </div>
+        <div class="info-row">
+          <span class="label">Seats at Table:</span>
+          <span id="guestSeats" class="value"></span>
+        </div>
+        <button id="backBtn" class="back-btn">Back to Search</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/checkin.js"></script>
+</body>
+</html>

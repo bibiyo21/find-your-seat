@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wedding Seating Planner</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header><div class="brand">♥ Wedding Seating Planner</div><button id="newEvent">+ New Event</button></header>
+<main>
+<section id="eventsView">
+  <h1>Your Events</h1>
+  <div id="events" class="cards"></div>
+  <div class="empty" id="emptyEvents">Create your first wedding event.</div>
+</section>
+<section id="eventView" class="hidden">
+  <div class="toolbar">
+    <button id="back">← Events</button>
+    <div><h1 id="eventName"></h1><div id="stats"></div></div>
+    <label class="button">Import Excel<input id="excel" type="file" accept=".xlsx,.xls,.csv" hidden></label>
+  </div>
+  <div class="grid">
+    <div class="panel">
+      <h2>Tables</h2>
+      <div id="tables"></div>
+    </div>
+    <div class="panel">
+      <h2>Guests</h2>
+      <input id="guestFilter" class="search" placeholder="Search guest...">
+      <div id="guests"></div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="panel qrPanel">
+      <h2>Event Check-In</h2>
+      <p>Share this QR code with guests for check-in:</p>
+      <div id="qrCode" style="text-align:center;"></div>
+    </div>
+    <div class="panel guestLookup">
+      <h2>Guest Seat Lookup</h2>
+      <p>Public-style lookup for testing your guest experience.</p>
+      <input id="lookup" class="search" placeholder="Type a guest name...">
+      <div id="lookupResults"></div>
+    </div>
+  </div>
+</section>
+</main>
+<div id="modal" class="modal hidden"><div class="modalBox">
+<h2>Create New Event</h2><input id="eventInput" class="search" placeholder="e.g. Ibrahem & Partner Wedding">
+<div class="actions"><button id="cancel">Cancel</button><button id="create" class="primary">Create Event</button></div>
+</div></div>
+<script src="/app.js"></script>
+</body>
+</html>
