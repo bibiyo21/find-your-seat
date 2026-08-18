@@ -5,8 +5,8 @@
   "description": "Wedding seating planner with Excel import and MongoDB storage",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server-mongodb.js",
+    "dev": "node server-sqlite.js"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -14,6 +14,6 @@
     "qrcode": "^1.5.4",
     "xlsx": "^0.18.5",
     "mongodb": "^6.0.0",
-    "better-sqlite3": "^9.0.0"
+    "sql.js": "^1.8.0"
   }
 }

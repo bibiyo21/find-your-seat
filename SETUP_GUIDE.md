@@ -17,21 +17,29 @@ npm install
 ```
 
 This installs:
-- `better-sqlite3` - SQLite database
+- `sql.js` - SQLite database (pure JavaScript)
 - `mongodb` - MongoDB driver (for production)
 - All other dependencies
 
 ### Step 2: Start Development Server
 
+**For SQLite (Local Development):**
+```bash
+npm run dev
+```
+
+The app will:
+- ✅ Use SQLite locally
+- ✅ Create `wedding.sqlite` file in project root
+- ✅ Auto-create all tables on first run
+- ✅ Run on http://localhost:3000
+
+**For MongoDB (Production Testing):**
 ```bash
 npm start
 ```
 
-The app will:
-- ✅ Automatically use SQLite locally
-- ✅ Create `wedding.sqlite` file in project root
-- ✅ Auto-create all tables on first run
-- ✅ Run on http://localhost:3000
+Requires `MONGODB_URI` environment variable to be set.
 
 ### Step 3: Test Locally
 
@@ -44,23 +52,21 @@ The app will:
 
 ## How It Works
 
-### Database Detection
+### Two Server Versions
 
-The app automatically detects which database to use:
+The app has two separate server files:
 
-```javascript
-const USE_MONGODB = process.env.MONGODB_URI ? true : false;
-```
+**`server-sqlite.js` (Development)**
+- Uses SQLite via sql.js
+- No external database needed
+- Perfect for local development
+- Run with: `npm run dev`
 
-**Local (No MONGODB_URI set):**
-- Uses SQLite
-- Creates `wedding.sqlite` file
-- No configuration needed
-
-**Production (MONGODB_URI set):**
+**`server-mongodb.js` (Production)**
 - Uses MongoDB Atlas
 - Requires `MONGODB_URI` environment variable
-- Set in Vercel dashboard
+- For production and Vercel deployment
+- Run with: `npm start`
 
 ---
 
@@ -101,27 +107,19 @@ wedding-seating-planner/
 
 ## Switching Between Versions
 
-### Use SQLite + MongoDB Dual Mode (Recommended)
+### Use SQLite (Development)
 
 ```bash
-# Rename the dual-mode server
-mv server.js server-mongodb.js
-mv server-dual.js server.js
-
-# Install dependencies
-npm install
-
-# Start (uses SQLite locally)
-npm start
+npm run dev
 ```
 
-### Use MongoDB Only (Original)
+### Use MongoDB (Production)
 
 ```bash
-# Keep original server.js
-# Make sure MONGODB_URI is set
-export MONGODB_URI=mongodb+srv://...
+# Set MongoDB URI
+export MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/wedding-planner
 
+# Start server
 npm start
 ```
 
@@ -229,7 +227,7 @@ npm install --save better-sqlite3
 npm install
 
 # 2. Start development server (uses SQLite)
-npm start
+npm run dev
 
 # 3. Open browser
 # http://localhost:3000
@@ -241,7 +239,22 @@ git add .
 git commit -m "Your changes"
 git push origin main
 
-# 6. Vercel automatically deploys with MongoDB
+# 6. Vercel automatically deploys with MongoDB (npm start)
+```
+
+## Production Workflow
+
+```bash
+# 1. Set MongoDB URI in Vercel dashboard
+# MONGODB_URI=mongodb+srv://...
+
+# 2. Push to GitHub
+git push origin main
+
+# 3. Vercel automatically:
+# - Detects MONGODB_URI environment variable
+# - Runs: npm start (uses server-mongodb.js)
+# - Deploys with MongoDB
 ```
 
 ---
