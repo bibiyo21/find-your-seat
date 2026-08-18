@@ -30,9 +30,6 @@ async function searchGuests(query) {
     $("#searchResults").innerHTML = guests.map(g => `
       <div class="guest-result" onclick="selectGuest('${esc(g.name)}', '${esc(g.table_number || 'Unassigned')}')">
         <div class="result-name">${esc(g.name)}</div>
-        <div class="result-details">
-          Table ${esc(g.table_number || "Unassigned")}
-        </div>
       </div>
     `).join("");
   } catch (e) {
