@@ -28,11 +28,10 @@ async function searchGuests(query) {
     }
     
     $("#searchResults").innerHTML = guests.map(g => `
-      <div class="guest-result" onclick="selectGuest('${esc(g.name)}', '${esc(g.table_number || 'Unassigned')}', ${g.seat_number || 'null'}, ${g.seats || 0})">
+      <div class="guest-result" onclick="selectGuest('${esc(g.name)}', '${esc(g.table_number || 'Unassigned')}')">
         <div class="result-name">${esc(g.name)}</div>
         <div class="result-details">
           Table ${esc(g.table_number || "Unassigned")}
-          ${g.seat_number ? `· Seat ${g.seat_number}` : ""}
         </div>
       </div>
     `).join("");
@@ -41,11 +40,9 @@ async function searchGuests(query) {
   }
 }
 
-function selectGuest(name, table, seat, seats) {
+function selectGuest(name, table) {
   $("#guestName").textContent = name;
   $("#guestTable").textContent = table;
-  $("#guestSeat").textContent = seat ? `Seat ${seat}` : "Not assigned";
-  $("#guestSeats").textContent = seats || "Unknown";
   
   $("#searchResults").innerHTML = "";
   $("#guestSearch").value = "";

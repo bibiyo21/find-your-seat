@@ -224,13 +224,20 @@ app.post("/api/events", async (req,res) => {
       result = await database.collection("events").insertOne({name, created_at: new Date().toISOString()});
       res.json({id: result.insertedId.toString(), name});
     } else {
-      database.run(`INSERT INTO events (name) VALUES (?)`, [name]);
-      const idResult = database.exec("SELECT last_insert_rowid() as id");
-      const id = idResult[0].values[0][0];
-      saveSQLiteDB();
-      res.json({id: id.toString(), name});
+      try {
+        database.run(`INSERT INTO events (name) VALUES (?)`, [name]);
+        const idResult = database.exec("SELECT last_insert_rowid() as id");
+        const id = idResult && idResult.length > 0 && idResult[0].values && idResult[0].values.length > 0 ? idResult[0].values[0][0] : null;
+        if (!id) throw new Error("Failed to get inserted ID");
+        saveSQLiteDB();
+        res.json({id: id.toString(), name});
+      } catch (sqlError) {
+        console.error("SQL Error:", sqlError);
+        throw sqlError;
+      }
     }
   } catch (e) {
+    console.error("Create event error:", e);
     res.status(500).json({error: e.message});
   }
 });

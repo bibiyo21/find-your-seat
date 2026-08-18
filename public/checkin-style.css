@@ -166,6 +166,32 @@ body {
   text-align: center;
 }
 
+.guest-name-display {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 600;
+  color: #292723;
+  margin-bottom: 40px;
+  padding: 20px;
+}
+
+.table-label {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 500;
+  color: #655f57;
+  margin-bottom: 20px;
+}
+
+.table-number-display {
+  text-align: center;
+  font-size: 64px;
+  font-weight: 700;
+  color: #292723;
+  margin-bottom: 40px;
+  line-height: 1;
+}
+
 .info-row {
   display: flex;
   justify-content: space-between;
