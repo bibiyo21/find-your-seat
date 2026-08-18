@@ -52,6 +52,17 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const normalize = s => String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
+// Helper to safely create ObjectId
+function safeObjectId(id) {
+  try {
+    if (!id || typeof id !== 'string') return null;
+    if (!/^[0-9a-f]{24}$/i.test(id)) return null;
+    return new ObjectId(id);
+  } catch (e) {
+    return null;
+  }
+}
+
 function findColumn(headers, candidates) {
   const normalized = headers.map(h => ({raw:h, n:normalize(h)}));
   for (const c of candidates) {
@@ -112,11 +123,14 @@ app.get("/api/events/:id", async (req,res) => {
   try {
     const database = await connectDB();
     
-    const event = await database.collection("events").findOne({_id: new ObjectId(req.params.id)});
+    const eventId = safeObjectId(req.params.id);
+    if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+    
+    const event = await database.collection("events").findOne({_id: eventId});
     if (!event) return res.status(404).json({error:"Event not found"});
     
-    const tables = await database.collection("tables").find({event_id: new ObjectId(req.params.id)}).toArray();
-    const guests = await database.collection("guests").find({event_id: new ObjectId(req.params.id)}).toArray();
+    const tables = await database.collection("tables").find({event_id: eventId}).toArray();
+    const guests = await database.collection("guests").find({event_id: eventId}).toArray();
     
     res.json({
       event: {id: event._id.toString(), name: event.name, created_at: event.created_at},
@@ -131,7 +145,8 @@ app.get("/api/events/:id", async (req,res) => {
 // Import Excel
 app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
   try {
-    const eventId = req.params.id;
+    const eventId = safeObjectId(req.params.id);
+    if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
     if (!req.file) return res.status(400).json({error:"Excel file is required"});
     
     // For memory storage, use buffer instead of file path
@@ -149,7 +164,6 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
     if (!tableCol) throw new Error("Could not find a table column.");
 
     const database = await connectDB();
-    const eventObjectId = new ObjectId(eventId);
     
     const counts = new Map();
     const parsed = [];
@@ -165,13 +179,13 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
     if (!parsed.length) throw new Error("No usable rows found.");
 
     // Clear existing data
-    await database.collection("guests").deleteMany({event_id: eventObjectId});
-    await database.collection("tables").deleteMany({event_id: eventObjectId});
+    await database.collection("guests").deleteMany({event_id: eventId});
+    await database.collection("tables").deleteMany({event_id: eventId});
     
     // Insert tables
     for (const [table, count] of counts) {
       await database.collection("tables").insertOne({
-        event_id: eventObjectId,
+        event_id: eventId,
         table_number: table,
         seats: count
       });
@@ -180,7 +194,7 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
     // Insert guests
     for (const g of parsed) {
       await database.collection("guests").insertOne({
-        event_id: eventObjectId,
+        event_id: eventId,
         name: g.name,
         table_number: g.table,
         seat_number: g.seat,
@@ -200,13 +214,17 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
 // Update table seats
 app.put("/api/events/:id/tables/:tableId", async (req,res) => {
   try {
+    const eventId = safeObjectId(req.params.id);
+    const tableId = safeObjectId(req.params.tableId);
+    if (!eventId || !tableId) return res.status(400).json({error:"Invalid ID format"});
+    
     const seats = Math.max(0, Number(req.body.seats));
     if (!Number.isInteger(seats)) return res.status(400).json({error:"Seats must be an integer"});
     
     const database = await connectDB();
     
     await database.collection("tables").updateOne(
-      {_id: new ObjectId(req.params.tableId), event_id: new ObjectId(req.params.id)},
+      {_id: tableId, event_id: eventId},
       {$set: {seats}}
     );
     
@@ -219,13 +237,17 @@ app.put("/api/events/:id/tables/:tableId", async (req,res) => {
 // Update guest
 app.put("/api/events/:id/guests/:guestId", async (req,res) => {
   try {
+    const eventId = safeObjectId(req.params.id);
+    const guestId = safeObjectId(req.params.guestId);
+    if (!eventId || !guestId) return res.status(400).json({error:"Invalid ID format"});
+    
     const table = String(req.body.table_number ?? "").trim();
     const seat = req.body.seat_number == null || req.body.seat_number === "" ? null : Number(req.body.seat_number);
     
     const database = await connectDB();
     
     await database.collection("guests").updateOne(
-      {_id: new ObjectId(req.params.guestId), event_id: new ObjectId(req.params.id)},
+      {_id: guestId, event_id: eventId},
       {$set: {table_number: table, seat_number: Number.isFinite(seat) ? seat : null}}
     );
     
@@ -238,13 +260,16 @@ app.put("/api/events/:id/guests/:guestId", async (req,res) => {
 // Search guests
 app.get("/api/events/:id/search", async (req,res) => {
   try {
+    const eventId = safeObjectId(req.params.id);
+    if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+    
     const q = String(req.query.q || "").trim();
     if (!q) return res.json([]);
     
     const database = await connectDB();
     
     const guests = await database.collection("guests").find({
-      event_id: new ObjectId(req.params.id),
+      event_id: eventId,
       name: {$regex: q, $options: "i"}
     }).limit(20).toArray();
     
@@ -257,9 +282,12 @@ app.get("/api/events/:id/search", async (req,res) => {
 // QR Code generation
 app.get("/api/events/:id/qr", async (req,res) => {
   try {
+    const eventId = safeObjectId(req.params.id);
+    if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+    
     const database = await connectDB();
     
-    const event = await database.collection("events").findOne({_id: new ObjectId(req.params.id)});
+    const event = await database.collection("events").findOne({_id: eventId});
     if (!event) return res.status(404).json({error:"Event not found"});
     
     const qrUrl = `${req.protocol}://${req.get('host')}/find-your-seat/${req.params.id}`;
@@ -291,14 +319,16 @@ app.get("/find-your-seat/:eventId", (req,res) => {
 
 app.get("/api/find-your-seat/:eventId/guest", async (req,res) => {
   try {
-    const eventId = req.params.eventId;
+    const eventId = safeObjectId(req.params.eventId);
+    if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+    
     const q = String(req.query.q || "").trim();
     if (!q) return res.json([]);
     
     const database = await connectDB();
     
     const guests = await database.collection("guests").find({
-      event_id: new ObjectId(eventId),
+      event_id: eventId,
       name: {$regex: q, $options: "i"}
     }).limit(20).toArray();
     
@@ -317,21 +347,25 @@ app.get("/api/find-your-seat/:eventId/guest", async (req,res) => {
 
 app.post("/api/find-your-seat/:eventId/guest/:guestId", async (req,res) => {
   try {
+    const eventId = safeObjectId(req.params.eventId);
+    const guestId = safeObjectId(req.params.guestId);
+    if (!eventId || !guestId) return res.status(400).json({error:"Invalid ID format"});
+    
     const database = await connectDB();
     
     const guest = await database.collection("guests").findOne({
-      _id: new ObjectId(req.params.guestId),
-      event_id: new ObjectId(req.params.eventId)
+      _id: guestId,
+      event_id: eventId
     });
     
     if (!guest) return res.status(404).json({error:"Guest not found"});
     
-    const existing = await database.collection("check_ins").findOne({guest_id: new ObjectId(req.params.guestId)});
+    const existing = await database.collection("check_ins").findOne({guest_id: guestId});
     if (existing) return res.json({already_checked_in: true, guest});
     
     await database.collection("check_ins").insertOne({
-      event_id: new ObjectId(req.params.eventId),
-      guest_id: new ObjectId(req.params.guestId),
+      event_id: eventId,
+      guest_id: guestId,
       checked_in_at: new Date().toISOString()
     });
     
