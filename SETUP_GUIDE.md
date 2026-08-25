@@ -52,21 +52,19 @@ Requires `MONGODB_URI` environment variable to be set.
 
 ## How It Works
 
-### Two Server Versions
+### One Server, Two Modes
 
-The app has two separate server files:
+The app has a single server file, `server.js`, that automatically picks its database based on the environment:
 
-**`server-sqlite.js` (Development)**
-- Uses SQLite via sql.js
+**`npm run dev` (Development)**
+- Always uses SQLite via sql.js, regardless of `MONGODB_URI`
 - No external database needed
 - Perfect for local development
-- Run with: `npm run dev`
 
-**`server-mongodb.js` (Production)**
-- Uses MongoDB Atlas
-- Requires `MONGODB_URI` environment variable
-- For production and Vercel deployment
-- Run with: `npm start`
+**`npm start` (Production)**
+- Uses MongoDB Atlas if `MONGODB_URI` is set (via the environment or a `.env` file)
+- Falls back to the same local SQLite file if `MONGODB_URI` isn't set
+- Used for production and Vercel deployment
 
 ---
 
@@ -252,8 +250,7 @@ git push origin main
 git push origin main
 
 # 3. Vercel automatically:
-# - Detects MONGODB_URI environment variable
-# - Runs: npm start (uses server-mongodb.js)
+# - Runs server.js, which detects the MONGODB_URI environment variable
 # - Deploys with MongoDB
 ```
 

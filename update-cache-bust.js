@@ -10,7 +10,8 @@ console.log(`Updating cache-bust version to: ${timestamp}`);
 const files = [
   "public/index.html",
   "public/checkin.html",
-  "public/checkin-select.html"
+  "public/checkin-select.html",
+  "public/print.html"
 ];
 
 files.forEach(file => {

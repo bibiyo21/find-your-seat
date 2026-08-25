@@ -5,16 +5,18 @@
   "description": "Wedding seating planner with Excel import and MongoDB storage",
   "main": "server.js",
   "scripts": {
-    "start": "node server-mongodb.js",
-    "dev": "node server-sqlite.js",
-    "cache-bust": "node update-cache-bust.js"
+    "start": "node server.js",
+    "dev": "MONGODB_URI= node server.js",
+    "cache-bust": "node update-cache-bust.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^5.1.0",
+    "mongodb": "^6.0.0",
     "multer": "^2.0.2",
     "qrcode": "^1.5.4",
-    "xlsx": "^0.18.5",
-    "mongodb": "^6.0.0",
-    "sql.js": "^1.8.0"
+    "sql.js": "^1.8.0",
+    "xlsx": "^0.18.5"
   }
 }

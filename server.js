@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const multer = require("multer");
 const XLSX = require("xlsx");
@@ -6,7 +8,10 @@ const fs = require("fs");
 const QRCode = require("qrcode");
 const initSqlJs = require("sql.js");
 
-// Determine which database to use
+// Uses MongoDB when MONGODB_URI is set (via the environment or a .env file),
+// otherwise falls back to a local SQLite file automatically.
+// `npm run dev` forces SQLite even if MONGODB_URI is set; `npm start` uses
+// MongoDB when available, or the same SQLite fallback when it isn't.
 const USE_MONGODB = process.env.MONGODB_URI ? true : false;
 
 let db;
@@ -74,7 +79,7 @@ async function initSQLite() {
     SQL = await initSqlJs();
   }
   
-  const dbPath = path.join(__dirname, "wedding.sqlite");
+  const dbPath = process.env.SQLITE_PATH || path.join(__dirname, "wedding.sqlite");
   let data;
   
   try {
@@ -90,7 +95,11 @@ async function initSQLite() {
     CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      door_x REAL,
+      door_y REAL,
+      stage_x REAL,
+      stage_y REAL
     );
     
     CREATE TABLE IF NOT EXISTS tables (
@@ -98,6 +107,9 @@ async function initSQLite() {
       event_id INTEGER NOT NULL,
       table_number TEXT,
       seats INTEGER,
+      shape TEXT DEFAULT 'round',
+      x REAL,
+      y REAL,
       FOREIGN KEY (event_id) REFERENCES events(id)
     );
     
@@ -121,6 +133,14 @@ async function initSQLite() {
     );
   `);
   
+  // Migrate older databases missing newer columns
+  for (const col of ["shape TEXT DEFAULT 'round'", "x REAL", "y REAL"]) {
+    try { db.run(`ALTER TABLE tables ADD COLUMN ${col}`); } catch (e) { /* column already exists */ }
+  }
+  for (const col of ["door_x REAL", "door_y REAL", "stage_x REAL", "stage_y REAL"]) {
+    try { db.run(`ALTER TABLE events ADD COLUMN ${col}`); } catch (e) { /* column already exists */ }
+  }
+  
   // Save database to file
   saveSQLiteDB();
   
@@ -132,7 +152,7 @@ function saveSQLiteDB() {
   if (!USE_MONGODB && db) {
     const data = db.export();
     const buffer = Buffer.from(data);
-    fs.writeFileSync(path.join(__dirname, "wedding.sqlite"), buffer);
+    fs.writeFileSync(process.env.SQLITE_PATH || path.join(__dirname, "wedding.sqlite"), buffer);
   }
 }
 
@@ -165,6 +185,12 @@ function findColumn(headers, candidates) {
   return null;
 }
 
+// VIP tables default to a rectangle shape on the floor plan so they're
+// visually distinct from regular round guest tables.
+function defaultShapeForTable(tableNumber) {
+  return /vip/i.test(String(tableNumber ?? "")) ? "rectangle" : "round";
+}
+
 // Get all events
 app.get("/api/events", async (req,res) => {
   try {
@@ -182,7 +208,7 @@ app.get("/api/events", async (req,res) => {
       }));
     } else {
       const result = database.exec("SELECT id, name FROM events");
-      events = result.length > 0 ? result[0].values.map(v => ({id: v[0], name: v[1], table_count: 0, guest_count: 0, seat_count: 0})) : [];
+      events = result.length > 0 ? result[0].values.map(v => ({id: String(v[0]), name: v[1], table_count: 0, guest_count: 0, seat_count: 0})) : [];
     }
     
     // Get counts for each event
@@ -235,6 +261,39 @@ app.post("/api/events", async (req,res) => {
   }
 });
 
+// Delete event
+app.delete("/api/events/:id", async (req,res) => {
+  try {
+    const database = await initDB();
+    
+    if (USE_MONGODB) {
+      const eventId = safeObjectId(req.params.id);
+      if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+      
+      const event = await database.collection("events").findOne({_id: eventId});
+      if (!event) return res.status(404).json({error:"Event not found"});
+      
+      await database.collection("guests").deleteMany({event_id: eventId});
+      await database.collection("tables").deleteMany({event_id: eventId});
+      await database.collection("check_ins").deleteMany({event_id: eventId});
+      await database.collection("events").deleteOne({_id: eventId});
+    } else {
+      const eventResult = database.exec(`SELECT id FROM events WHERE id = ${req.params.id}`);
+      if (eventResult.length === 0 || eventResult[0].values.length === 0) return res.status(404).json({error:"Event not found"});
+      
+      database.run(`DELETE FROM guests WHERE event_id = ?`, [req.params.id]);
+      database.run(`DELETE FROM tables WHERE event_id = ?`, [req.params.id]);
+      database.run(`DELETE FROM check_ins WHERE event_id = ?`, [req.params.id]);
+      database.run(`DELETE FROM events WHERE id = ?`, [req.params.id]);
+      saveSQLiteDB();
+    }
+    
+    res.json({ok:true});
+  } catch (e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
 // Get event details
 app.get("/api/events/:id", async (req,res) => {
   try {
@@ -253,24 +312,119 @@ app.get("/api/events/:id", async (req,res) => {
       guests = await database.collection("guests").find({event_id: eventId}).toArray();
       
       res.json({
-        event: {id: event._id.toString(), name: event.name, created_at: event.created_at},
-        tables: tables.map(t => ({...t, id: t._id.toString(), event_id: t.event_id.toString()})),
+        event: {id: event._id.toString(), name: event.name, created_at: event.created_at, door_x: event.door_x ?? null, door_y: event.door_y ?? null, stage_x: event.stage_x ?? null, stage_y: event.stage_y ?? null},
+        tables: tables.map(t => ({...t, id: t._id.toString(), event_id: t.event_id.toString(), shape: t.shape || "round", x: t.x ?? null, y: t.y ?? null})),
         guests: guests.map(g => ({...g, id: g._id.toString(), event_id: g.event_id.toString()}))
       });
     } else {
-      const eventResult = database.exec(`SELECT id, name, created_at FROM events WHERE id = ${req.params.id}`);
+      const eventResult = database.exec(`SELECT id, name, created_at, door_x, door_y, stage_x, stage_y FROM events WHERE id = ${req.params.id}`);
       if (eventResult.length === 0 || eventResult[0].values.length === 0) return res.status(404).json({error:"Event not found"});
       
-      event = {id: eventResult[0].values[0][0], name: eventResult[0].values[0][1], created_at: eventResult[0].values[0][2]};
+      const ev = eventResult[0].values[0];
+      // Ids are stringified so the frontend can compare them consistently
+      // regardless of backend (MongoDB's ObjectId is always a string).
+      event = {id: String(ev[0]), name: ev[1], created_at: ev[2], door_x: ev[3], door_y: ev[4], stage_x: ev[5], stage_y: ev[6]};
       
-      const tableResult = database.exec(`SELECT id, event_id, table_number, seats FROM tables WHERE event_id = ${req.params.id}`);
-      tables = tableResult.length > 0 ? tableResult[0].values.map(v => ({id: v[0], event_id: v[1], table_number: v[2], seats: v[3]})) : [];
+      const tableResult = database.exec(`SELECT id, event_id, table_number, seats, shape, x, y FROM tables WHERE event_id = ${req.params.id}`);
+      tables = tableResult.length > 0 ? tableResult[0].values.map(v => ({id: String(v[0]), event_id: String(v[1]), table_number: v[2], seats: v[3], shape: v[4] || "round", x: v[5], y: v[6]})) : [];
       
       const guestResult = database.exec(`SELECT id, event_id, name, table_number, seat_number, created_at FROM guests WHERE event_id = ${req.params.id}`);
-      guests = guestResult.length > 0 ? guestResult[0].values.map(v => ({id: v[0], event_id: v[1], name: v[2], table_number: v[3], seat_number: v[4], created_at: v[5]})) : [];
+      guests = guestResult.length > 0 ? guestResult[0].values.map(v => ({id: String(v[0]), event_id: String(v[1]), name: v[2], table_number: v[3], seat_number: v[4], created_at: v[5]})) : [];
       
       res.json({event, tables, guests});
     }
+  } catch (e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
+// Update venue layout markers (main door / stage position)
+app.put("/api/events/:id/layout", async (req,res) => {
+  try {
+    const updates = {};
+    for (const key of ["door_x","door_y","stage_x","stage_y"]) {
+      if (req.body[key] !== undefined) updates[key] = Number(req.body[key]);
+    }
+    if (!Object.keys(updates).length) return res.status(400).json({error:"No fields to update"});
+    
+    const database = await initDB();
+    
+    if (USE_MONGODB) {
+      const eventId = safeObjectId(req.params.id);
+      if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+      await database.collection("events").updateOne({_id: eventId}, {$set: updates});
+    } else {
+      const cols = Object.keys(updates);
+      const setClause = cols.map(c => `${c} = ?`).join(", ");
+      database.run(`UPDATE events SET ${setClause} WHERE id = ?`, [...cols.map(c=>updates[c]), req.params.id]);
+      saveSQLiteDB();
+    }
+    
+    res.json({ok:true});
+  } catch (e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
+// Create a table manually
+app.post("/api/events/:id/tables", async (req,res) => {
+  try {
+    const table_number = String(req.body.table_number ?? "").trim();
+    if (!table_number) return res.status(400).json({error:"Table number/name is required"});
+    const seatsNum = req.body.seats === undefined || req.body.seats === "" ? 8 : Number(req.body.seats);
+    if (!Number.isFinite(seatsNum)) return res.status(400).json({error:"Seats must be a number"});
+    const seats = Math.max(1, Math.round(seatsNum));
+    const shape = ["round","rectangle"].includes(req.body.shape) ? req.body.shape : defaultShapeForTable(table_number);
+    
+    const database = await initDB();
+    
+    if (USE_MONGODB) {
+      const eventId = safeObjectId(req.params.id);
+      if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+      const existing = await database.collection("tables").findOne({event_id: eventId, table_number});
+      if (existing) return res.status(400).json({error:"A table with that number already exists"});
+      const result = await database.collection("tables").insertOne({event_id: eventId, table_number, seats, shape, x: null, y: null});
+      res.json({id: result.insertedId.toString(), table_number, seats, shape});
+    } else {
+      const existingResult = database.exec(`SELECT id FROM tables WHERE event_id = ${req.params.id} AND table_number = '${table_number.replace(/'/g,"''")}'`);
+      if (existingResult.length > 0 && existingResult[0].values.length > 0) return res.status(400).json({error:"A table with that number already exists"});
+      database.run(`INSERT INTO tables (event_id, table_number, seats, shape) VALUES (?, ?, ?, ?)`, [req.params.id, table_number, seats, shape]);
+      const idResult = database.exec("SELECT last_insert_rowid() as id");
+      const id = idResult[0].values[0][0];
+      saveSQLiteDB();
+      res.json({id: id.toString(), table_number, seats, shape});
+    }
+  } catch (e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
+// Delete a table (and unassign any guests seated at it)
+app.delete("/api/events/:id/tables/:tableId", async (req,res) => {
+  try {
+    const database = await initDB();
+    
+    if (USE_MONGODB) {
+      const eventId = safeObjectId(req.params.id);
+      const tableId = safeObjectId(req.params.tableId);
+      if (!eventId || !tableId) return res.status(400).json({error:"Invalid ID format"});
+      
+      const table = await database.collection("tables").findOne({_id: tableId, event_id: eventId});
+      if (!table) return res.status(404).json({error:"Table not found"});
+      
+      await database.collection("guests").updateMany({event_id: eventId, table_number: table.table_number}, {$set: {table_number: "", seat_number: null}});
+      await database.collection("tables").deleteOne({_id: tableId, event_id: eventId});
+    } else {
+      const tableResult = database.exec(`SELECT table_number FROM tables WHERE id = ${req.params.tableId} AND event_id = ${req.params.id}`);
+      if (tableResult.length === 0 || tableResult[0].values.length === 0) return res.status(404).json({error:"Table not found"});
+      const tableNumber = tableResult[0].values[0][0];
+      
+      database.run(`UPDATE guests SET table_number = '', seat_number = NULL WHERE event_id = ? AND table_number = ?`, [req.params.id, tableNumber]);
+      database.run(`DELETE FROM tables WHERE id = ? AND event_id = ?`, [req.params.tableId, req.params.id]);
+      saveSQLiteDB();
+    }
+    
+    res.json({ok:true});
   } catch (e) {
     res.status(500).json({error: e.message});
   }
@@ -323,14 +477,16 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
     
     // Insert tables
     for (const [table, count] of counts) {
+      const shape = defaultShapeForTable(table);
       if (USE_MONGODB) {
         await database.collection("tables").insertOne({
           event_id: eventId,
           table_number: table,
-          seats: count
+          seats: count,
+          shape
         });
       } else {
-        database.run(`INSERT INTO tables (event_id, table_number, seats) VALUES (?, ?, ?)`, [eventId, table, count]);
+        database.run(`INSERT INTO tables (event_id, table_number, seats, shape) VALUES (?, ?, ?, ?)`, [eventId, table, count, shape]);
       }
     }
     
@@ -357,11 +513,22 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
   }
 });
 
-// Update table seats
+// Update table (seats, shape, and/or floor plan position)
 app.put("/api/events/:id/tables/:tableId", async (req,res) => {
   try {
-    const seats = Math.max(0, Number(req.body.seats));
-    if (!Number.isInteger(seats)) return res.status(400).json({error:"Seats must be an integer"});
+    const updates = {};
+    if (req.body.seats !== undefined) {
+      const seatsNum = Number(req.body.seats);
+      if (!Number.isFinite(seatsNum)) return res.status(400).json({error:"Seats must be a number"});
+      updates.seats = Math.max(0, Math.round(seatsNum));
+    }
+    if (req.body.shape !== undefined) {
+      if (!["round","rectangle"].includes(req.body.shape)) return res.status(400).json({error:"Shape must be 'round' or 'rectangle'"});
+      updates.shape = req.body.shape;
+    }
+    if (req.body.x !== undefined) updates.x = Number(req.body.x);
+    if (req.body.y !== undefined) updates.y = Number(req.body.y);
+    if (!Object.keys(updates).length) return res.status(400).json({error:"No fields to update"});
     
     const database = await initDB();
     
@@ -372,10 +539,12 @@ app.put("/api/events/:id/tables/:tableId", async (req,res) => {
       
       await database.collection("tables").updateOne(
         {_id: tableId, event_id: eventId},
-        {$set: {seats}}
+        {$set: updates}
       );
     } else {
-      database.run(`UPDATE tables SET seats = ? WHERE id = ? AND event_id = ?`, [seats, req.params.tableId, req.params.id]);
+      const cols = Object.keys(updates);
+      const setClause = cols.map(c => `${c} = ?`).join(", ");
+      database.run(`UPDATE tables SET ${setClause} WHERE id = ? AND event_id = ?`, [...cols.map(c=>updates[c]), req.params.tableId, req.params.id]);
       saveSQLiteDB();
     }
     
@@ -433,7 +602,7 @@ app.get("/api/events/:id/search", async (req,res) => {
       guests = guests.map(g => ({...g, id: g._id.toString(), event_id: g.event_id.toString()}));
     } else {
       const result = database.exec(`SELECT id, event_id, name, table_number, seat_number FROM guests WHERE event_id = ${eventId} AND name LIKE '%${q}%' LIMIT 20`);
-      guests = result.length > 0 ? result[0].values.map(v => ({id: v[0], event_id: v[1], name: v[2], table_number: v[3], seat_number: v[4]})) : [];
+      guests = result.length > 0 ? result[0].values.map(v => ({id: String(v[0]), event_id: String(v[1]), name: v[2], table_number: v[3], seat_number: v[4]})) : [];
     }
     
     res.json(guests);
@@ -467,6 +636,57 @@ app.get("/api/events/:id/qr", async (req,res) => {
   }
 });
 
+// Export guest/table data as an Excel workbook
+app.get("/api/events/:id/export/excel", async (req,res) => {
+  try {
+    const database = await initDB();
+    
+    let event, tables, guests;
+    if (USE_MONGODB) {
+      const eventId = safeObjectId(req.params.id);
+      if (!eventId) return res.status(400).json({error:"Invalid event ID format"});
+      event = await database.collection("events").findOne({_id: eventId});
+      if (!event) return res.status(404).json({error:"Event not found"});
+      tables = await database.collection("tables").find({event_id: eventId}).toArray();
+      guests = await database.collection("guests").find({event_id: eventId}).toArray();
+    } else {
+      const eventResult = database.exec(`SELECT id, name FROM events WHERE id = ${req.params.id}`);
+      if (eventResult.length === 0 || eventResult[0].values.length === 0) return res.status(404).json({error:"Event not found"});
+      event = {id: eventResult[0].values[0][0], name: eventResult[0].values[0][1]};
+      const tableResult = database.exec(`SELECT id, table_number, seats FROM tables WHERE event_id = ${req.params.id}`);
+      tables = tableResult.length > 0 ? tableResult[0].values.map(v => ({table_number: v[1], seats: v[2]})) : [];
+      const guestResult = database.exec(`SELECT name, table_number, seat_number FROM guests WHERE event_id = ${req.params.id}`);
+      guests = guestResult.length > 0 ? guestResult[0].values.map(v => ({name: v[0], table_number: v[1], seat_number: v[2]})) : [];
+    }
+    
+    const guestRows = guests
+      .slice()
+      .sort((a,b) => String(a.table_number||"").localeCompare(String(b.table_number||""), undefined, {numeric:true}) || String(a.name).localeCompare(String(b.name)))
+      .map(g => ({Name: g.name, Table: g.table_number || "Unassigned", Seat: g.seat_number ?? ""}));
+    const tableRows = tables
+      .slice()
+      .sort((a,b) => String(a.table_number||"").localeCompare(String(b.table_number||""), undefined, {numeric:true}))
+      .map(t => ({Table: t.table_number, Seats: t.seats}));
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(guestRows), "Guests");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tableRows), "Tables");
+    const buffer = XLSX.write(wb, {type:"buffer", bookType:"xlsx"});
+    
+    const filename = `${String(event.name).replace(/[^a-z0-9]+/gi,"-")}-seating.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
+// Print-ready seating chart page
+app.get("/events/:id/print", (req,res) => {
+  res.sendFile(path.join(__dirname, "public", "print.html"));
+});
+
 // Find Your Seat routes
 app.get("/find-your-seat", (req,res) => {
   res.sendFile(path.join(__dirname, "public", "checkin-select.html"));
@@ -483,7 +703,7 @@ app.get("/api/events/list", async (req,res) => {
       events = events.map(e => ({id: e._id.toString(), name: e.name}));
     } else {
       const result = database.exec("SELECT id, name FROM events");
-      events = result.length > 0 ? result[0].values.map(v => ({id: v[0], name: v[1]})) : [];
+      events = result.length > 0 ? result[0].values.map(v => ({id: String(v[0]), name: v[1]})) : [];
     }
     
     res.json(events);
@@ -522,7 +742,7 @@ app.get("/api/events/:eventId/guest", async (req,res) => {
       }));
     } else {
       const result = database.exec(`SELECT id, name, table_number, seat_number FROM guests WHERE event_id = ${eventId} AND name LIKE '%${q}%' LIMIT 20`);
-      guests = result.length > 0 ? result[0].values.map(v => ({id: v[0], name: v[1], table_number: v[2], seat_number: v[3], seats: 0, checked_in: 0})) : [];
+      guests = result.length > 0 ? result[0].values.map(v => ({id: String(v[0]), name: v[1], table_number: v[2], seat_number: v[3], seats: 0, checked_in: 0})) : [];
     }
     
     res.json(guests);
@@ -578,4 +798,8 @@ app.post("/api/events/:eventId/guest/:guestId", async (req,res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Wedding Seating Planner: http://localhost:${PORT} (${USE_MONGODB ? 'MongoDB' : 'SQLite'})`));
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`Wedding Seating Planner: http://localhost:${PORT} (${USE_MONGODB ? 'MongoDB' : 'SQLite'})`));
+}
+
+module.exports = app;

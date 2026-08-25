@@ -43,8 +43,7 @@ npm start
 
 ```
 wedding-seating-planner/
-├── server-sqlite.js      # SQLite version (dev)
-├── server-mongodb.js     # MongoDB version (start)
+├── server.js             # single server: MongoDB if MONGODB_URI is set, otherwise SQLite
 ├── package.json          # npm scripts
 ├── wedding.sqlite        # SQLite database (created locally)
 └── ...
