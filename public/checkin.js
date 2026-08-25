@@ -135,10 +135,20 @@ function renderGuide(tableNumber, guestFirstName) {
       <div class="guide-label">${guestFirstName ? esc(guestFirstName) + ", follow" : "Follow"} the gold path from the entrance to your table</div>
       <button type="button" id="guideExpandBtn" class="guide-expand-btn" title="Expand for a bigger view">⤢ Expand</button>
     </div>
-    <svg viewBox="${minX} ${minY} ${vw} ${vh}" class="guide-svg" preserveAspectRatio="xMidYMid meet">
-      <defs><marker id="guideArrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c9a227"/></marker></defs>
-      ${parts.join("")}
-    </svg>
+    <div class="guide-zoom-viewport" id="guideZoomViewport">
+      <div class="guide-zoom-content" id="guideZoomContent">
+        <svg viewBox="${minX} ${minY} ${vw} ${vh}" class="guide-svg" preserveAspectRatio="xMidYMid meet">
+          <defs><marker id="guideArrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c9a227"/></marker></defs>
+          ${parts.join("")}
+        </svg>
+      </div>
+    </div>
+    <div class="guide-zoom-controls">
+      <button type="button" id="guideZoomOut" aria-label="Zoom out">−</button>
+      <span id="guideZoomLevel" class="guide-zoom-level">100%</span>
+      <button type="button" id="guideZoomIn" aria-label="Zoom in">+</button>
+      <span class="guide-zoom-hint">pinch or double-tap the map to zoom</span>
+    </div>
     <div class="guide-legend">
       <span><i class="guide-swatch guide-swatch-match"></i> Your table</span>
       <span><i class="guide-swatch guide-swatch-door"></i> Entrance</span>
@@ -146,6 +156,71 @@ function renderGuide(tableNumber, guestFirstName) {
     </div>`;
   box.classList.remove("hidden");
   $("#guideExpandBtn").onclick = () => setGuideExpanded(!box.classList.contains("expanded"));
+  setupGuideZoom();
+}
+
+// --- Pinch / button zoom for the wayfinding map (guests are on phones) ---
+const GUIDE_ZOOM_MIN = 1, GUIDE_ZOOM_MAX = 4, GUIDE_ZOOM_STEP = 0.5;
+let guideZoom = 1;
+
+function applyGuideZoom() {
+  const content = $("#guideZoomContent");
+  const level = $("#guideZoomLevel");
+  if (!content) return;
+  content.style.transform = `scale(${guideZoom})`;
+  if (level) level.textContent = `${Math.round(guideZoom * 100)}%`;
+  const outBtn = $("#guideZoomOut"), inBtn = $("#guideZoomIn");
+  if (outBtn) outBtn.disabled = guideZoom <= GUIDE_ZOOM_MIN;
+  if (inBtn) inBtn.disabled = guideZoom >= GUIDE_ZOOM_MAX;
+}
+
+function setGuideZoom(z) {
+  guideZoom = Math.min(GUIDE_ZOOM_MAX, Math.max(GUIDE_ZOOM_MIN, z));
+  applyGuideZoom();
+}
+
+function setupGuideZoom() {
+  guideZoom = 1;
+  applyGuideZoom();
+
+  const viewport = $("#guideZoomViewport");
+  const zoomOut = $("#guideZoomOut"), zoomIn = $("#guideZoomIn");
+  if (zoomOut) zoomOut.onclick = () => setGuideZoom(guideZoom - GUIDE_ZOOM_STEP);
+  if (zoomIn) zoomIn.onclick = () => setGuideZoom(guideZoom + GUIDE_ZOOM_STEP);
+  if (!viewport) return;
+
+  // Pinch-to-zoom with two touches.
+  let pinchStartDist = null, pinchStartZoom = 1;
+  const touchDist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+  viewport.addEventListener("touchstart", e => {
+    if (e.touches.length === 2) {
+      pinchStartDist = touchDist(e.touches);
+      pinchStartZoom = guideZoom;
+    }
+  }, {passive: true});
+
+  viewport.addEventListener("touchmove", e => {
+    if (e.touches.length === 2 && pinchStartDist) {
+      e.preventDefault();
+      const ratio = touchDist(e.touches) / pinchStartDist;
+      setGuideZoom(pinchStartZoom * ratio);
+    }
+  }, {passive: false});
+
+  viewport.addEventListener("touchend", e => {
+    if (e.touches.length < 2) pinchStartDist = null;
+  });
+
+  // Double-tap / double-click to toggle between fit and a closer zoom.
+  let lastTap = 0;
+  viewport.addEventListener("touchend", e => {
+    if (e.changedTouches.length !== 1 || pinchStartDist) return;
+    const now = Date.now();
+    if (now - lastTap < 300) setGuideZoom(guideZoom > GUIDE_ZOOM_MIN ? 1 : 2.5);
+    lastTap = now;
+  });
+  viewport.addEventListener("dblclick", () => setGuideZoom(guideZoom > GUIDE_ZOOM_MIN ? 1 : 2.5));
 }
 
 function setGuideExpanded(expanded) {
@@ -156,6 +231,7 @@ function setGuideExpanded(expanded) {
   backdrop.classList.toggle("hidden", !expanded);
   document.body.classList.toggle("guide-lock-scroll", expanded);
   if (btn) { btn.textContent = expanded ? "⤡ Minimize" : "⤢ Expand"; btn.title = expanded ? "Minimize" : "Expand for a bigger view"; }
+  setGuideZoom(1);
 }
 
 $("#guideBackdrop").addEventListener("click", () => setGuideExpanded(false));
