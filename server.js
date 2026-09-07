@@ -1,6 +1,8 @@
 require("dotenv").config();
 
 const express = require("express");
+const session = require("express-session");
+const crypto = require("crypto");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const path = require("path");
@@ -160,7 +162,63 @@ function saveSQLiteDB() {
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+
+// --- Admin authentication -------------------------------------------------
+// The admin dashboard (event/table/guest management) requires a login,
+// configured via ADMIN_USERNAME / ADMIN_PASSWORD in the environment or a
+// .env file. The public guest experience (scanning a QR code to find a
+// seat) stays fully open — see the specific routes marked "public" below.
+if (!process.env.SESSION_SECRET) {
+  console.warn("SESSION_SECRET is not set; using a random secret generated at startup (sessions won't survive a restart). Set SESSION_SECRET in your environment or .env file for production.");
+}
+app.use(session({
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 }
+}));
+
+function timingSafeEqual(a, b) {
+  const bufA = Buffer.from(String(a ?? ""));
+  const bufB = Buffer.from(String(b ?? ""));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function requireAuth(req, res, next) {
+  if (req.session && req.session.authenticated) return next();
+  if (req.path.startsWith("/api/")) return res.status(401).json({error: "Login required"});
+  return res.redirect("/");
+}
+
+app.post("/api/login", (req, res) => {
+  const {username, password} = req.body || {};
+  const adminUser = process.env.ADMIN_USERNAME || "";
+  const adminPass = process.env.ADMIN_PASSWORD || "";
+  if (!adminUser || !adminPass) {
+    return res.status(500).json({error: "ADMIN_USERNAME/ADMIN_PASSWORD are not configured on the server"});
+  }
+  if (timingSafeEqual(username, adminUser) && timingSafeEqual(password, adminPass)) {
+    req.session.authenticated = true;
+    return res.json({ok: true});
+  }
+  res.status(401).json({error: "Invalid username or password"});
+});
+
+app.post("/api/logout", (req, res) => {
+  req.session.destroy(() => res.json({ok: true}));
+});
+
+// Root: login page if there's no active session, otherwise the admin dashboard.
+app.get("/", (req, res) => {
+  const file = req.session && req.session.authenticated ? "index.html" : "login.html";
+  res.sendFile(path.join(__dirname, "public", file));
+});
+
+// Prevent bypassing the "/" gate by requesting the dashboard's file directly.
+app.get("/index.html", (req, res) => res.redirect("/"));
+
+app.use(express.static(path.join(__dirname, "public"), {index: false}));
 
 const normalize = s => String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -192,7 +250,7 @@ function defaultShapeForTable(tableNumber) {
 }
 
 // Get all events
-app.get("/api/events", async (req,res) => {
+app.get("/api/events", requireAuth, async (req,res) => {
   try {
     const database = await initDB();
     
@@ -238,7 +296,7 @@ app.get("/api/events", async (req,res) => {
 });
 
 // Create event
-app.post("/api/events", async (req,res) => {
+app.post("/api/events", requireAuth, async (req,res) => {
   try {
     const {name} = req.body;
     if (!name) return res.status(400).json({error:"Event name is required"});
@@ -262,7 +320,7 @@ app.post("/api/events", async (req,res) => {
 });
 
 // Delete event
-app.delete("/api/events/:id", async (req,res) => {
+app.delete("/api/events/:id", requireAuth, async (req,res) => {
   try {
     const database = await initDB();
     
@@ -294,7 +352,10 @@ app.delete("/api/events/:id", async (req,res) => {
   }
 });
 
-// Get event details
+// Get event details. Deliberately public (no requireAuth): the guest-facing
+// check-in page (GET /events/:id) needs this to load the event name and the
+// floor plan (tables + door/stage) for the wayfinding guide. It's read-only
+// and only reachable by knowing the event's id.
 app.get("/api/events/:id", async (req,res) => {
   try {
     const database = await initDB();
@@ -339,7 +400,7 @@ app.get("/api/events/:id", async (req,res) => {
 });
 
 // Update venue layout markers (main door / stage position)
-app.put("/api/events/:id/layout", async (req,res) => {
+app.put("/api/events/:id/layout", requireAuth, async (req,res) => {
   try {
     const updates = {};
     for (const key of ["door_x","door_y","stage_x","stage_y"]) {
@@ -367,7 +428,7 @@ app.put("/api/events/:id/layout", async (req,res) => {
 });
 
 // Create a table manually
-app.post("/api/events/:id/tables", async (req,res) => {
+app.post("/api/events/:id/tables", requireAuth, async (req,res) => {
   try {
     const table_number = String(req.body.table_number ?? "").trim();
     if (!table_number) return res.status(400).json({error:"Table number/name is required"});
@@ -400,7 +461,7 @@ app.post("/api/events/:id/tables", async (req,res) => {
 });
 
 // Delete a table (and unassign any guests seated at it)
-app.delete("/api/events/:id/tables/:tableId", async (req,res) => {
+app.delete("/api/events/:id/tables/:tableId", requireAuth, async (req,res) => {
   try {
     const database = await initDB();
     
@@ -431,7 +492,7 @@ app.delete("/api/events/:id/tables/:tableId", async (req,res) => {
 });
 
 // Import Excel
-app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
+app.post("/api/events/:id/import", requireAuth, upload.single("file"), async (req,res) => {
   try {
     const eventId = USE_MONGODB ? safeObjectId(req.params.id) : req.params.id;
     if (USE_MONGODB && !eventId) return res.status(400).json({error:"Invalid event ID format"});
@@ -514,7 +575,7 @@ app.post("/api/events/:id/import", upload.single("file"), async (req,res) => {
 });
 
 // Update table (seats, shape, and/or floor plan position)
-app.put("/api/events/:id/tables/:tableId", async (req,res) => {
+app.put("/api/events/:id/tables/:tableId", requireAuth, async (req,res) => {
   try {
     const updates = {};
     if (req.body.seats !== undefined) {
@@ -555,7 +616,7 @@ app.put("/api/events/:id/tables/:tableId", async (req,res) => {
 });
 
 // Update guest
-app.put("/api/events/:id/guests/:guestId", async (req,res) => {
+app.put("/api/events/:id/guests/:guestId", requireAuth, async (req,res) => {
   try {
     const eventId = USE_MONGODB ? safeObjectId(req.params.id) : req.params.id;
     const guestId = USE_MONGODB ? safeObjectId(req.params.guestId) : req.params.guestId;
@@ -583,7 +644,7 @@ app.put("/api/events/:id/guests/:guestId", async (req,res) => {
 });
 
 // Search guests
-app.get("/api/events/:id/search", async (req,res) => {
+app.get("/api/events/:id/search", requireAuth, async (req,res) => {
   try {
     const eventId = USE_MONGODB ? safeObjectId(req.params.id) : req.params.id;
     if (USE_MONGODB && !eventId) return res.status(400).json({error:"Invalid event ID format"});
@@ -612,7 +673,7 @@ app.get("/api/events/:id/search", async (req,res) => {
 });
 
 // QR Code generation
-app.get("/api/events/:id/qr", async (req,res) => {
+app.get("/api/events/:id/qr", requireAuth, async (req,res) => {
   try {
     const eventId = USE_MONGODB ? safeObjectId(req.params.id) : req.params.id;
     if (USE_MONGODB && !eventId) return res.status(400).json({error:"Invalid event ID format"});
@@ -637,7 +698,7 @@ app.get("/api/events/:id/qr", async (req,res) => {
 });
 
 // Export guest/table data as an Excel workbook
-app.get("/api/events/:id/export/excel", async (req,res) => {
+app.get("/api/events/:id/export/excel", requireAuth, async (req,res) => {
   try {
     const database = await initDB();
     
@@ -683,9 +744,13 @@ app.get("/api/events/:id/export/excel", async (req,res) => {
 });
 
 // Print-ready seating chart page
-app.get("/events/:id/print", (req,res) => {
+app.get("/events/:id/print", requireAuth, (req,res) => {
   res.sendFile(path.join(__dirname, "public", "print.html"));
 });
+
+// --- Public guest-facing routes (no login required) -----------------------
+// These power the "scan the QR code, find your name, see your table"
+// experience and must stay reachable without an admin session.
 
 // Find Your Seat routes
 app.get("/find-your-seat", (req,res) => {
@@ -712,10 +777,12 @@ app.get("/api/events/list", async (req,res) => {
   }
 });
 
+// Public per-event guest check-in page (this is what the QR code links to).
 app.get("/events/:id", (req,res) => {
   res.sendFile(path.join(__dirname, "public", "checkin.html"));
 });
 
+// Public guest name search used by the check-in page above.
 app.get("/api/events/:eventId/guest", async (req,res) => {
   try {
     const eventId = USE_MONGODB ? safeObjectId(req.params.eventId) : req.params.eventId;
@@ -751,6 +818,7 @@ app.get("/api/events/:eventId/guest", async (req,res) => {
   }
 });
 
+// Public: lets a guest mark themselves checked in from the check-in page above.
 app.post("/api/events/:eventId/guest/:guestId", async (req,res) => {
   try {
     const eventId = USE_MONGODB ? safeObjectId(req.params.eventId) : req.params.eventId;

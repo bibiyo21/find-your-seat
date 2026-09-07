@@ -1,5 +1,5 @@
 const test = require("node:test");
-const {spawnServer} = require("./spawn-server");
+const {spawnServer, loginAsTestAdmin} = require("./spawn-server");
 const {runApiSuite} = require("./api-suite");
 
 // These tests need a real MongoDB connection string (Atlas, local mongod, etc).
@@ -12,7 +12,8 @@ const mongoUri = process.env.TEST_MONGODB_URI || "";
 test("server.js (MongoDB mode)", {skip: !mongoUri && "set TEST_MONGODB_URI to run MongoDB tests"}, async () => {
   const server = await spawnServer("server.js", 39233, {MONGODB_URI: mongoUri});
   try {
-    await runApiSuite(server.baseUrl);
+    const cookie = await loginAsTestAdmin(server.baseUrl);
+    await runApiSuite(server.baseUrl, cookie);
   } finally {
     server.stop();
   }

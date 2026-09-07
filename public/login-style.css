@@ -1,0 +1,7 @@
+.loginBody{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.loginWrap{width:100%;max-width:380px}
+.loginCard{background:#fff;border:1px solid var(--cream-alt);border-radius:16px;padding:36px 30px;box-shadow:0 10px 40px rgba(107,15,26,.12);border-top:4px solid var(--gold)}
+.loginBrand{font-family:"Great Vibes",cursive;font-size:28px;color:var(--burgundy);text-align:center;margin-bottom:6px}
+.loginCard h1{text-align:center;font-size:22px;margin:0 0 24px}
+.loginSubmit{width:100%;padding:12px;font-size:16px}
+.loginError{background:#fdecec;color:#b02a2a;border:1px solid #d8a3a3;border-radius:9px;padding:10px 12px;font-size:14px;margin-bottom:12px}
