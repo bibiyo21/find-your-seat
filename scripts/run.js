@@ -3,6 +3,11 @@
 // http://localhost:3000 serves the frontend (proxying /api/* to the API on
 // :3001, per frontend/next.config.js). `dev` uses hot-reload dev servers;
 // `start` builds the frontend once, then runs both in production mode.
+//
+// Loads the root .env here (not just inside server.js) so the frontend
+// child process also gets SESSION_SECRET — frontend/lib/session.js verifies
+// the admin cookie's signature itself now, so it needs that value too.
+require("dotenv").config();
 const { spawnSync, spawn } = require("child_process");
 const path = require("path");
 
