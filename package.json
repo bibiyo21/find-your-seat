@@ -2,12 +2,16 @@
   "name": "wedding-seating-planner",
   "version": "1.0.0",
   "private": true,
-  "description": "Wedding seating planner with Excel import and MongoDB storage",
+  "description": "Wedding seating planner API (Express) with a Next.js frontend in frontend/",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "MONGODB_URI= node server.js",
-    "cache-bust": "node update-cache-bust.js",
+    "start": "node scripts/run.js start",
+    "dev": "node scripts/run.js dev",
+    "api": "node server.js",
+    "api:dev": "MONGODB_URI= node server.js",
+    "frontend": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:start": "npm --prefix frontend run start",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

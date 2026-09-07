@@ -1,5 +1,8 @@
-// Covers the admin login/logout flow and the public-vs-protected route split:
-//   - "/" serves the login page when there's no session, the dashboard when there is
+// Covers the admin login/logout flow and the public-vs-protected route split.
+// server.js is an API-only backend now (the Next.js app in frontend/ renders
+// the actual pages and asks GET /api/session whether it should show the
+// dashboard or redirect to /login):
+//   - GET /api/session reports the session state the frontend gates on
 //   - wrong credentials are rejected, correct credentials establish a session
 //   - admin API routes require that session; the public guest routes never do
 //   - logging out ends the session
@@ -7,19 +10,14 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {spawnServer, TEST_ADMIN_USERNAME, TEST_ADMIN_PASSWORD} = require("./spawn-server");
 
-test("admin login/logout gates the dashboard and API", async () => {
+test("admin login/logout gates the API session and admin routes", async () => {
   const server = await spawnServer("server.js", 39236, {SQLITE_PATH: "/tmp/wedding-test-auth.sqlite", MONGODB_URI: ""});
   try {
-    // "/" with no session serves the login page, not the dashboard.
-    let r = await fetch(`${server.baseUrl}/`);
-    let body = await r.text();
+    // With no session, /api/session reports not authenticated.
+    let r = await fetch(`${server.baseUrl}/api/session`);
+    let body = await r.json();
     assert.equal(r.status, 200);
-    assert.match(body, /Admin Login/i);
-    assert.doesNotMatch(body, /Your Events/);
-
-    // Requesting the dashboard file directly is redirected back to "/".
-    r = await fetch(`${server.baseUrl}/index.html`, {redirect: "manual"});
-    assert.ok([301, 302, 303, 307, 308].includes(r.status), "index.html should redirect when not logged in");
+    assert.equal(body.authenticated, false);
 
     // Wrong credentials are rejected.
     r = await fetch(`${server.baseUrl}/api/login`, {
@@ -40,10 +38,10 @@ test("admin login/logout gates the dashboard and API", async () => {
     assert.equal(r.status, 200, "correct credentials should log in");
     const cookie = r.headers.get("set-cookie").split(";")[0];
 
-    // "/" now serves the dashboard.
-    r = await fetch(`${server.baseUrl}/`, {headers: {Cookie: cookie}});
-    body = await r.text();
-    assert.match(body, /Your Events/);
+    // /api/session now reports authenticated.
+    r = await fetch(`${server.baseUrl}/api/session`, {headers: {Cookie: cookie}});
+    body = await r.json();
+    assert.equal(body.authenticated, true);
 
     // Admin API now works.
     r = await fetch(`${server.baseUrl}/api/events`, {headers: {Cookie: cookie}});

@@ -33,6 +33,12 @@ h2{font-size:21px;margin:0 0 16px;font-family:"Playfair Display",serif;color:var
 .search{width:100%;border:1px solid var(--gold);border-radius:9px;padding:11px 12px;font:inherit;margin-bottom:12px}
 .guestRow .name{flex:1}
 .seatInput{width:70px;padding:7px;border:1px solid var(--cream-alt);border-radius:7px;font:inherit}
+.pageSizeRow{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:14px;color:#8a7a63}
+.pageSizeRow select{border:1px solid var(--cream-alt);border-radius:7px;padding:5px 8px;font:inherit}
+.pagination{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px}
+.pagination button{padding:6px 12px}
+.pagination button:disabled{opacity:.4;cursor:default}
+.pageInfo{font-size:14px;color:#8a7a63}
 .guestLookup{margin-top:18px}
 .result{padding:14px;border-radius:10px;background:var(--cream);margin-top:8px;border-left:3px solid var(--gold)}
 .result strong{font-size:18px;color:var(--burgundy)}

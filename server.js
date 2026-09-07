@@ -29,7 +29,10 @@ if (USE_MONGODB) {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// This process is now an API-only backend: the Next.js app in `frontend/`
+// (dev server on :3000) proxies /api/* to it via `rewrites()` in
+// frontend/next.config.js, so it defaults to a different port.
+const PORT = process.env.PORT || 3001;
 const MONGODB_URI = process.env.MONGODB_URI;
 
 // Initialize database
@@ -187,8 +190,7 @@ function timingSafeEqual(a, b) {
 
 function requireAuth(req, res, next) {
   if (req.session && req.session.authenticated) return next();
-  if (req.path.startsWith("/api/")) return res.status(401).json({error: "Login required"});
-  return res.redirect("/");
+  return res.status(401).json({error: "Login required"});
 }
 
 app.post("/api/login", (req, res) => {
@@ -209,16 +211,13 @@ app.post("/api/logout", (req, res) => {
   req.session.destroy(() => res.json({ok: true}));
 });
 
-// Root: login page if there's no active session, otherwise the admin dashboard.
-app.get("/", (req, res) => {
-  const file = req.session && req.session.authenticated ? "index.html" : "login.html";
-  res.sendFile(path.join(__dirname, "public", file));
+// Lets the frontend (Next.js) ask whether the current session is an
+// authenticated admin session, e.g. to decide whether "/" should render the
+// dashboard or redirect to "/login". Deliberately public: it only reveals a
+// boolean, never any data.
+app.get("/api/session", (req, res) => {
+  res.json({authenticated: !!(req.session && req.session.authenticated)});
 });
-
-// Prevent bypassing the "/" gate by requesting the dashboard's file directly.
-app.get("/index.html", (req, res) => res.redirect("/"));
-
-app.use(express.static(path.join(__dirname, "public"), {index: false}));
 
 const normalize = s => String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -347,6 +346,28 @@ app.delete("/api/events/:id", requireAuth, async (req,res) => {
     }
     
     res.json({ok:true});
+  } catch (e) {
+    res.status(500).json({error: e.message});
+  }
+});
+
+// Get all events (for Find Your Seat page). Must stay registered before
+// GET /api/events/:id below, or Express matches that route first with
+// id="list" and this handler never runs.
+app.get("/api/events/list", async (req,res) => {
+  try {
+    const database = await initDB();
+
+    let events;
+    if (USE_MONGODB) {
+      events = await database.collection("events").find({}).toArray();
+      events = events.map(e => ({id: e._id.toString(), name: e.name}));
+    } else {
+      const result = database.exec("SELECT id, name FROM events");
+      events = result.length > 0 ? result[0].values.map(v => ({id: String(v[0]), name: v[1]})) : [];
+    }
+
+    res.json(events);
   } catch (e) {
     res.status(500).json({error: e.message});
   }
@@ -689,7 +710,11 @@ app.get("/api/events/:id/qr", requireAuth, async (req,res) => {
     }
     if (!event) return res.status(404).json({error:"Event not found"});
     
-    const qrUrl = `${req.protocol}://${req.get('host')}/events/${req.params.id}`;
+    // Not req.get('host'): the Next.js frontend (frontend/) proxies /api/*
+    // to this process, so that would be this API's own host:port (3001),
+    // not the public address guests scan the QR code from.
+    const publicUrl = process.env.PUBLIC_URL || "http://localhost:3000";
+    const qrUrl = `${publicUrl}/events/${req.params.id}`;
     const qrCode = await QRCode.toDataURL(qrUrl);
     res.json({qrCode, url: qrUrl});
   } catch (e) {
@@ -743,46 +768,14 @@ app.get("/api/events/:id/export/excel", requireAuth, async (req,res) => {
   }
 });
 
-// Print-ready seating chart page
-app.get("/events/:id/print", requireAuth, (req,res) => {
-  res.sendFile(path.join(__dirname, "public", "print.html"));
-});
-
 // --- Public guest-facing routes (no login required) -----------------------
 // These power the "scan the QR code, find your name, see your table"
-// experience and must stay reachable without an admin session.
+// experience and must stay reachable without an admin session. The pages
+// themselves (print chart, find-your-seat, per-event check-in) are rendered
+// by the Next.js frontend now; this API only needs to keep serving their data.
 
-// Find Your Seat routes
-app.get("/find-your-seat", (req,res) => {
-  res.sendFile(path.join(__dirname, "public", "checkin-select.html"));
-});
-
-// Get all events (for Find Your Seat page)
-app.get("/api/events/list", async (req,res) => {
-  try {
-    const database = await initDB();
-    
-    let events;
-    if (USE_MONGODB) {
-      events = await database.collection("events").find({}).toArray();
-      events = events.map(e => ({id: e._id.toString(), name: e.name}));
-    } else {
-      const result = database.exec("SELECT id, name FROM events");
-      events = result.length > 0 ? result[0].values.map(v => ({id: String(v[0]), name: v[1]})) : [];
-    }
-    
-    res.json(events);
-  } catch (e) {
-    res.status(500).json({error: e.message});
-  }
-});
-
-// Public per-event guest check-in page (this is what the QR code links to).
-app.get("/events/:id", (req,res) => {
-  res.sendFile(path.join(__dirname, "public", "checkin.html"));
-});
-
-// Public guest name search used by the check-in page above.
+// Public guest name search used by the check-in page (rendered by the
+// Next.js frontend at /events/:id, this is what the QR code links to).
 app.get("/api/events/:eventId/guest", async (req,res) => {
   try {
     const eventId = USE_MONGODB ? safeObjectId(req.params.eventId) : req.params.eventId;

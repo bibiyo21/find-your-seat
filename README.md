@@ -9,14 +9,16 @@ A small JavaScript/Node.js wedding seating planner using SQLite and Excel import
 ## Run
 ```bash
 npm install
+npm --prefix frontend install
 npm start   # or: npm run dev
 ```
 
 Open http://localhost:3000
 
-There's a single server, `server.js` (also used for deployment, see `vercel.json`):
-- `npm start` uses MongoDB if `MONGODB_URI` is set (via the environment or a `.env` file — copy `.env.example` to `.env` and fill it in), and otherwise automatically falls back to a local SQLite file (`wedding.sqlite`, created automatically).
-- `npm run dev` always uses that local SQLite file, ignoring `MONGODB_URI`, so you can develop locally without touching your production database.
+There are two processes: the Express API (`server.js`, port 3001) and the Next.js frontend (`frontend/`, port 3000), which proxies `/api/*` to the API so the browser sees everything as same-origin. `npm start`/`npm run dev` launch both together via `scripts/run.js`; `http://localhost:3000` is the one you open.
+- `npm start` builds and runs the frontend in production mode, and runs the API using MongoDB if `MONGODB_URI` is set (via the environment or a `.env` file — copy `.env.example` to `.env` and fill it in), otherwise falling back to a local SQLite file (`wedding.sqlite`, created automatically).
+- `npm run dev` runs both in dev mode (frontend hot-reloading) and always uses the local SQLite file, ignoring `MONGODB_URI`, so you can develop locally without touching your production database.
+- To run just the API (e.g. for the test suite), use `npm run api` or `npm run api:dev`.
 
 ## Admin login
 

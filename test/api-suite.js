@@ -168,10 +168,6 @@ async function runApiSuite(baseUrl, cookie) {
     assert.equal(res.status, 200);
     assert.match(res.body.qrCode, /^data:image\//);
 
-    // Print page
-    rawRes = await fetch(`${baseUrl}/events/${eventId}/print`, {headers: cookie ? {Cookie: cookie} : {}});
-    assert.equal(rawRes.status, 200, "print page should be served");
-
     // --- Admin routes require auth; public guest routes don't ---
     const noAuth = await fetch(`${baseUrl}/api/events`);
     assert.equal(noAuth.status, 401, "admin route should reject requests without a session");
@@ -181,9 +177,6 @@ async function runApiSuite(baseUrl, cookie) {
 
     const publicGuestSearch = await fetch(`${baseUrl}/api/events/${eventId}/guest?q=al`);
     assert.equal(publicGuestSearch.status, 200, "guest search must stay public for the guest check-in page");
-
-    const publicCheckinPage = await fetch(`${baseUrl}/events/${eventId}`);
-    assert.equal(publicCheckinPage.status, 200, "guest check-in page must stay public");
   } finally {
     // Clean up so the test never leaves residue behind, even against a real DB.
     await api(`/api/events/${eventId}`, {method: "DELETE"});
