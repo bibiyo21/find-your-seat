@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 const express = require("express");
-const session = require("express-session");
 const crypto = require("crypto");
 const multer = require("multer");
 const XLSX = require("xlsx");
@@ -171,15 +170,43 @@ app.use(express.json());
 // configured via ADMIN_USERNAME / ADMIN_PASSWORD in the environment or a
 // .env file. The public guest experience (scanning a QR code to find a
 // seat) stays fully open — see the specific routes marked "public" below.
+//
+// Auth is a signed cookie (HMAC over an expiry + a revocation epoch), not a
+// server-side session store: on Vercel each request can land on a different
+// serverless instance with its own memory, so an in-memory session store
+// (e.g. express-session's default MemoryStore) would "forget" a login as
+// soon as a request hit a different instance. The signature itself needs no
+// shared state (only SESSION_SECRET must be consistent across instances),
+// but logout has to actually revoke the cookie, so the "epoch" it's signed
+// against is bumped on logout and — when MongoDB is configured — persisted
+// there so every instance agrees on it. Without MongoDB (SQLite mode, e.g.
+// local dev) it's just an in-memory counter, since that mode already
+// assumes a single process.
 if (!process.env.SESSION_SECRET) {
-  console.warn("SESSION_SECRET is not set; using a random secret generated at startup (sessions won't survive a restart). Set SESSION_SECRET in your environment or .env file for production.");
+  console.warn("SESSION_SECRET is not set; using a random secret generated at startup. On serverless platforms (e.g. Vercel) each instance generates its own random secret, so login cookies signed by one instance won't validate on another — set SESSION_SECRET explicitly in production.");
 }
-app.use(session({
-  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 }
-}));
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const AUTH_COOKIE = "admin_auth";
+const AUTH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+let authEpoch = 0;
+app.set("trust proxy", 1);
+
+async function currentAuthEpoch() {
+  if (!USE_MONGODB) return authEpoch;
+  const database = await initDB();
+  const doc = await database.collection("settings").findOne({ _id: "auth" });
+  return doc ? doc.epoch : 0;
+}
+
+async function bumpAuthEpoch() {
+  const epoch = Date.now();
+  if (USE_MONGODB) {
+    const database = await initDB();
+    await database.collection("settings").updateOne({ _id: "auth" }, { $set: { epoch } }, { upsert: true });
+  } else {
+    authEpoch = epoch;
+  }
+}
 
 function timingSafeEqual(a, b) {
   const bufA = Buffer.from(String(a ?? ""));
@@ -188,12 +215,51 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function requireAuth(req, res, next) {
-  if (req.session && req.session.authenticated) return next();
+async function signAuthCookie() {
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + AUTH_MAX_AGE_MS, epoch: await currentAuthEpoch() })).toString("base64url");
+  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+async function verifyAuthCookie(value) {
+  if (!value) return false;
+  const [payload, sig] = value.split(".");
+  if (!payload || !sig) return false;
+  const expectedSig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return false;
+  try {
+    const { exp, epoch } = JSON.parse(Buffer.from(payload, "base64url").toString());
+    if (typeof exp !== "number" || Date.now() >= exp) return false;
+    return epoch === (await currentAuthEpoch());
+  } catch {
+    return false;
+  }
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+
+async function isAuthenticated(req) {
+  return verifyAuthCookie(parseCookies(req)[AUTH_COOKIE]);
+}
+
+async function requireAuth(req, res, next) {
+  if (await isAuthenticated(req)) return next();
   return res.status(401).json({error: "Login required"});
 }
 
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const {username, password} = req.body || {};
   const adminUser = process.env.ADMIN_USERNAME || "";
   const adminPass = process.env.ADMIN_PASSWORD || "";
@@ -201,22 +267,29 @@ app.post("/api/login", (req, res) => {
     return res.status(500).json({error: "ADMIN_USERNAME/ADMIN_PASSWORD are not configured on the server"});
   }
   if (timingSafeEqual(username, adminUser) && timingSafeEqual(password, adminPass)) {
-    req.session.authenticated = true;
+    res.cookie(AUTH_COOKIE, await signAuthCookie(), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: req.secure,
+      maxAge: AUTH_MAX_AGE_MS,
+    });
     return res.json({ok: true});
   }
   res.status(401).json({error: "Invalid username or password"});
 });
 
-app.post("/api/logout", (req, res) => {
-  req.session.destroy(() => res.json({ok: true}));
+app.post("/api/logout", async (req, res) => {
+  await bumpAuthEpoch();
+  res.clearCookie(AUTH_COOKIE);
+  res.json({ok: true});
 });
 
 // Lets the frontend (Next.js) ask whether the current session is an
 // authenticated admin session, e.g. to decide whether "/" should render the
 // dashboard or redirect to "/login". Deliberately public: it only reveals a
 // boolean, never any data.
-app.get("/api/session", (req, res) => {
-  res.json({authenticated: !!(req.session && req.session.authenticated)});
+app.get("/api/session", async (req, res) => {
+  res.json({authenticated: await isAuthenticated(req)});
 });
 
 const normalize = s => String(s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
