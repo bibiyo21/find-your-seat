@@ -1,9 +1,43 @@
-import { useEffect, useRef, useState } from "react";
-import { computeGuide } from "../lib/guide";
+// Map feature commented out per coordinator: supplier has own table arrangement
+// in the venue, so the floor-plan map is not useful. Replaced with a text
+// directions box using the venue's fixed layout rule: odd tables left side,
+// even tables right side, VIP table near the stage.
+//
+// import { useEffect, useRef, useState } from "react";
+// import { computeGuide } from "../lib/guide";
+//
+// const GUIDE_ZOOM_MIN = 1, GUIDE_ZOOM_MAX = 4, GUIDE_ZOOM_STEP = 0.5;
 
-const GUIDE_ZOOM_MIN = 1, GUIDE_ZOOM_MAX = 4, GUIDE_ZOOM_STEP = 0.5;
+function getDirectionText(tableNumber) {
+  if (/vip/i.test(String(tableNumber))) {
+    return (
+      <>
+        Please proceed at the <strong>VIP table</strong>, located near the stage.
+      </>
+    );
+  }
+  const num = parseInt(tableNumber, 10);
+  if (!Number.isNaN(num)) {
+    const side = num % 2 === 0 ? "RIGHT SIDE" : "LEFT SIDE";
+    return (
+      <>
+        Please proceed on the <strong>{side}</strong> of the venue.
+      </>
+    );
+  }
+  return `Your table is Table ${tableNumber}. Ask a member of the wedding party for directions.`;
+}
 
-export default function WayfindingGuide({ eventData, tableNumber, guestFirstName }) {
+export default function WayfindingGuide({ eventData, tableNumber }) {
+  if (!eventData || !tableNumber) return null;
+
+  return (
+    <div className="floorplan-guide">
+      <div className="guide-label">{getDirectionText(tableNumber)}</div>
+    </div>
+  );
+
+  /* --- original interactive SVG map, commented out ---
   const guide = computeGuide(eventData, tableNumber);
   const [expanded, setExpanded] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -240,4 +274,5 @@ export default function WayfindingGuide({ eventData, tableNumber, guestFirstName
       {expanded && <div className="guide-backdrop" onClick={() => setExpanded(false)} />}
     </>
   );
+  --- end original --- */
 }

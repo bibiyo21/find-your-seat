@@ -89,8 +89,6 @@ export default function CheckIn() {
     }
   }
 
-  const guestFirstName = selectedGuest ? String(selectedGuest.name || "").trim().split(/\s+/)[0] : "";
-
   return (
     <>
       <Head>
@@ -162,7 +160,7 @@ export default function CheckIn() {
                 <div className="table-number-display" id="guestTable">
                   {selectedGuest.table_number || "Unassigned"}
                 </div>
-                <WayfindingGuide eventData={eventData} tableNumber={selectedGuest.table_number} guestFirstName={guestFirstName} />
+                <WayfindingGuide eventData={eventData} tableNumber={selectedGuest.table_number} />
                 <button id="backBtn" className="back-btn" onClick={backToSearch}>
                   Back to Search
                 </button>
